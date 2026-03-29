@@ -17,7 +17,28 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import platform
 
+# --- FIX LỖI VIRTUALBOX TRÊN WINDOWS  ---
+def get_windows_vbox_path():
+    try:
+        import winreg
+        registry_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Oracle\VirtualBox", 0, winreg.KEY_READ)
+        value, _ = winreg.QueryValueEx(registry_key, "InstallDir")
+        winreg.CloseKey(registry_key)
+        if value and os.path.exists(os.path.join(value, "VBoxManage.exe")):
+            return value
+    except Exception:
+        pass 
+    return None
+
+if platform.system() == "Windows":
+    vbox_path = get_windows_vbox_path()
+    if vbox_path:
+        vbox_path = vbox_path.rstrip("\\")
+        # Bơm đường dẫn xịn vừa tìm được vào hệ thống cho Python nhìn thấy
+        if vbox_path not in os.environ["PATH"]:
+            os.environ["PATH"] += os.pathsep + vbox_path
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
@@ -695,21 +716,31 @@ def ssh_connect(name: str):
         return
     print(f"\n[SSH] Ket noi vao '{name}'...")
     print_ssh_info()
-    os.execvp(
+    
+    # Cấu hình lệnh SSH chung cho cả 2 hệ điều hành
+    ssh_cmd = [
         "ssh",
-        [
-            "ssh",
-            "-p",
-            str(SSH_PORT),
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "ConnectTimeout=10",
-            f"{VM_USER}@{SSH_HOST}",
-        ],
-    )
+        "-p",
+        str(SSH_PORT),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "ConnectTimeout=10",
+        f"{VM_USER}@{SSH_HOST}",
+    ]
+
+    import platform
+    if platform.system() == "Windows":
+        # Trên Windows: Dùng subprocess để tránh lỗi văng Terminal, kẹt phím
+        try:
+            subprocess.run(ssh_cmd)
+        except KeyboardInterrupt:
+            print("\n[INFO] Đã ngắt kết nối SSH.")
+    else:
+        # Trên Linux/Mac: Dùng os.execvp để tối ưu hiệu năng và giữ I/O nguyên bản
+        os.execvp("ssh", ssh_cmd)
 
 
 def ssh_run_command(command: str) -> str:
@@ -782,29 +813,43 @@ def main():
                 cpus=int(cpu) if cpu.isdigit() else DEFAULT_CPUS,
             )
         elif choice == "2":
-            start_vm(VM_NAME, headless=True)
+            print()
+            name = input(f"  Ten VM can Start [{VM_NAME}]: ").strip() or VM_NAME
+            start_vm(name, headless=True)
         elif choice == "3":
-            start_vm(VM_NAME, headless=False)
+            print()
+            name = input(f"  Ten VM can Start [{VM_NAME}]: ").strip() or VM_NAME
+            start_vm(name, headless=False)
         elif choice == "4":
-            stop_vm(VM_NAME, force=False)
+            print()
+            name = input(f"  Ten VM can Stop [{VM_NAME}]: ").strip() or VM_NAME
+            stop_vm(name, force=False)
         elif choice == "5":
-            stop_vm(VM_NAME, force=True)
+            print()
+            name = input(f"  Ten VM can Force Stop [{VM_NAME}]: ").strip() or VM_NAME
+            stop_vm(name, force=True)
         elif choice == "6":
-            s = get_vm_state(VM_NAME)
+            print()
+            name = input(f"  Ten VM can Pause/Resume [{VM_NAME}]: ").strip() or VM_NAME
+            s = get_vm_state(name)
             if s == "running":
-                pause_vm(VM_NAME)
+                pause_vm(name)
             elif s == "paused":
-                resume_vm(VM_NAME)
+                resume_vm(name)
             else:
-                print(f"  [SKIP] State hien tai: '{s}'")
+                print(f"  [SKIP] State hien tai cua '{name}': '{s}'")
         elif choice == "7":
-            print_vm_status(VM_NAME)
+            print()
+            name = input(f"  Ten VM can xem [{VM_NAME}]: ").strip() or VM_NAME
+            print_vm_status(name)
         elif choice == "8":
             list_all_vms()
         elif choice == "9":
             wait_for_ssh()
         elif choice == "10":
-            ssh_connect(VM_NAME)
+            print()
+            name = input(f"  Ten VM can SSH [{VM_NAME}]: ").strip() or VM_NAME
+            ssh_connect(name)
         elif choice == "11":
             cmd = input("  Lenh: ").strip()
             if cmd:
@@ -815,8 +860,10 @@ def main():
         elif choice == "12":
             print_ssh_info()
         elif choice == "13":
-            if input(f"  Xac nhan xoa '{VM_NAME}'? (yes/no): ").strip() == "yes":
-                delete_vm(VM_NAME)
+            print()
+            name = input(f"  Ten VM can XOA [{VM_NAME}]: ").strip() or VM_NAME
+            if input(f"  Xac nhan xoa vinh vien '{name}'? (yes/no): ").strip() == "yes":
+                delete_vm(name)
         elif choice == "0":
             print("\n  Bye!\n")
             break
