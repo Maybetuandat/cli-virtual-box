@@ -50,6 +50,118 @@ DEFAULT_CPUS = CPUS
 # HELPER
 # ═══════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════
+# SSH NANG CAO - CHAY LENH CO SUDO + STREAMING OUTPUT
+# ═══════════════════════════════════════════════════════════════════
+
+
+def ssh_run_sudo(command: str):
+    """
+    Chay lenh voi sudo, hien thi output real-time.
+    Vi VM_USER co NOPASSWD:ALL nen khong can nhap password.
+    """
+    full_cmd = f"sudo {command}" if not command.startswith("sudo") else command
+    print(f"\n  $ {full_cmd}")
+    print("  " + "-" * 50)
+
+    proc = subprocess.Popen(
+        [
+            "ssh",
+            "-p",
+            str(SSH_PORT),
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "ConnectTimeout=10",
+            f"{VM_USER}@{SSH_HOST}",
+            full_cmd,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    for line in proc.stdout:
+        print(f"  {line}", end="")
+
+    proc.wait()
+    print("  " + "-" * 50)
+    return proc.returncode
+
+
+def ssh_run_script(script: str):
+    """
+    Truyen ca 1 bash script vao VM qua stdin.
+    Dung cho cai dat nhieu buoc.
+
+    Vi du:
+        ssh_run_script('''
+            apt update -y
+            apt install -y nginx git curl
+            systemctl enable nginx
+        ''')
+    """
+    print(f"\n  [SCRIPT] Dang chay script trong VM...")
+    print("  " + "-" * 50)
+
+    proc = subprocess.Popen(
+        [
+            "ssh",
+            "-p",
+            str(SSH_PORT),
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "ConnectTimeout=10",
+            f"{VM_USER}@{SSH_HOST}",
+            "sudo bash -s",  # <-- doc script tu stdin, chay bang bash
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    stdout, _ = proc.communicate(input=script)
+    for line in stdout.splitlines():
+        print(f"  {line}")
+
+    print("  " + "-" * 50)
+    returncode = proc.returncode
+    if returncode == 0:
+        print("  [OK] Script chay thanh cong!\n")
+    else:
+        print(f"  [LOI] Exit code: {returncode}\n")
+    return returncode
+
+
+def upload_and_run(local_script_path: str):
+    """
+    Upload file .sh tu may that len VM, roi chay.
+    """
+    remote_path = f"/tmp/{os.path.basename(local_script_path)}"
+
+    print(f"\n  [UPLOAD] {local_script_path} -> VM:{remote_path}")
+    subprocess.run(
+        [
+            "scp",
+            "-P",
+            str(SSH_PORT),
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            local_script_path,
+            f"{VM_USER}@{SSH_HOST}:{remote_path}",
+        ]
+    )
+
+    return ssh_run_sudo(f"bash {remote_path}")
+
 
 def run(cmd: list, silent=False) -> subprocess.CompletedProcess:
     if not silent:
@@ -760,6 +872,8 @@ def print_menu():
     print("  ║  11. Chay lenh qua SSH                   ║")
     print("  ║  12. In thong tin SSH                    ║")
     print("  ║  13. Xoa VM                              ║")
+    print("  ║  14. Cai dat package (apt install)       ║")
+    print("  ║  15. Chay script file (.sh)              ║")
     print("  ║  0.  Thoat                               ║")
     print("  ╚══════════════════════════════════════════╝")
     print()
@@ -817,6 +931,20 @@ def main():
         elif choice == "13":
             if input(f"  Xac nhan xoa '{VM_NAME}'? (yes/no): ").strip() == "yes":
                 delete_vm(VM_NAME)
+        elif choice == "14":
+            packages = input("  Nhap package (vd: nginx git curl): ").strip()
+            if packages:
+                ssh_run_script(f"""
+                    export DEBIAN_FRONTEND=noninteractive
+                    apt update -y
+                    apt install -y {packages}
+                """)
+        elif choice == "15":
+            path = input("  Duong dan script (.sh): ").strip()
+            if os.path.exists(path):
+                upload_and_run(path)
+            else:
+                print(f"  [LOI] File khong ton tai: {path}")
         elif choice == "0":
             print("\n  Bye!\n")
             break
